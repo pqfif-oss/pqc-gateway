@@ -1,0 +1,12 @@
+.DS_Store
+.idea
+.vscode
+*.suo
+*.gz
+*.ntvs*
+*.njsproj
+*.sln
+.env.production.local
+
+/bin/
+/build/
