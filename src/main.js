@@ -11,22 +11,58 @@ var opts = options(pipy.argv, {
     '--watch': false,
     '--debug': false,
     '--dump': false,
+    '--version': false,
+    '--help': false,
   },
   shorthands: {
     '-c': '--config',
     '-w': '--watch',
     '-d': '--debug',
+    '-v': '--version',
+    '-h': '--help',
   },
 })
 
-enableLog(opts['--debug'])
-enableDump(opts['--dump'])
+if (opts['--help']) {
+  println('')
+  println('PQC-enabled Gateway')
+  println('')
+  println('Usage: gw [-c|--config <filename/dirname>] [-w|--watch] [-d|--debug] [-v|--version] [-h|--help]')
+  println('')
+  println('Options:')
+  println('  -c, --config <filename/dirname>    Point to the configuration file or directory')
+  println('  -w, --watch                        Monitor configuration changes and perform live updates')
+  println('  -d, --debug                        Print debugging log for each request')
+  println('  -v, --version                      Print version information')
+  println('  -h, --help                         Print help information')
+  println('')
 
-resources.init(opts['--config'], opts['--watch'] ? makeResourceWatcher() : null)
-resources.list('Gateway').forEach(gw => {
-  if (gw.metadata?.name) {
-    startGateway(gw)
-  }
-})
+} else if (opts['--version']) {
+  try {
+    var version = JSON.decode(pipy.load('version.json'))
+  } catch {}
+  println(`Version:`)
+  println(`  Tag    : ${version?.tag}`)
+  println(`  Commit : ${version?.commit}`)
+  println(`  Date   : ${version?.date}`)
+  println(`Pipy Version:`)
+  println(`  Tag    : ${pipy.version?.tag}`)
+  println(`  Commit : ${pipy.version?.commit}`)
+  println(`  Date   : ${pipy.version?.date}`)
 
-console.info('FGW started')
+} else if (opts['--config']) {
+  enableLog(opts['--debug'])
+  enableDump(opts['--dump'])
+
+  resources.init(opts['--config'], opts['--watch'] ? makeResourceWatcher() : null)
+  resources.list('Gateway').forEach(gw => {
+    if (gw.metadata?.name) {
+      startGateway(gw)
+    }
+  })
+
+  console.info('FGW started')
+
+} else {
+  println(`gw: Configuration not specified. Type 'gw -h' for help.`)
+}

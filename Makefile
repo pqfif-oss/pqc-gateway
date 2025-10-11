@@ -14,6 +14,7 @@ endif
 all: $(PGW_EXE)
 
 $(PGW_EXE): $(PWG_PIPY_EXE)
+	$(PGW_DIR)/pre-build.sh
 	mkdir -p bin
 	mkdir -p build
 	cd build && $(CMAKE) ../pipy \
