@@ -45,7 +45,7 @@ Options:
   -h, --help                           Print help information
 ~~~~~
 
-## Try Simple Sample
+## Simple Sample
 
 ### Start pgc-gateway
 ~~~~~bash
