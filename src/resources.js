@@ -79,22 +79,23 @@ function init(pathname, onResourceChange) {
       watch()
     }
   }
-}
 
-function readFile(pathname) {
-  try {
-    if (isJSON(pathname)) {
-      return JSON.decode(pipy.load(pathname))
-    } else if (isYAML(pathname)) {
-      return YAML.decode(pipy.load(pathname))
-    } else if (isSecret(pathname)) {
-      var name = os.path.basename(pathname)
-      secrets[name] = pipy.load(pathname)
+  function readFile(pathname) {
+    try {
+      if (isJSON(pathname)) {
+        return JSON.decode(pipy.load(pathname))
+      } else if (isYAML(pathname)) {
+        return YAML.decode(pipy.load(pathname))
+      } else if (isSecret(pathname)) {
+        var name = os.path.basename(pathname)
+        secrets[name] = pipy.load(pathname)
+      }
+    } catch {
+      console.error(`Cannot load or parse file: ${pathname}, skpped.`)
     }
-  } catch {
-    console.error(`Cannot load or parse file: ${pathname}, skpped.`)
   }
 }
+
 
 function changeFile(pathname, data) {
   var old = files[pathname]
@@ -196,12 +197,196 @@ function runUpdaters(kind, key, a, b, c) {
   return false
 }
 
+function initURL({ url, tls }, onResourceChange) {
+  var agent = new http.Agent(
+    url.host,
+    {
+      tls: url.protocol === 'https:' ? (tls || {}) : null
+    }
+  )
+
+  var configVersion = null
+  var configFiles = {}
+
+  return init()
+
+  function init() {
+    return download().then(obj => {
+      if (!obj) {
+        console.error('Failed to download configuration')
+        return new Timeout(10).wait().then(init)
+      }
+
+      configVersion = obj.version
+      configFiles = obj.files
+
+      Object.entries(obj.files).forEach(
+        ([pathname, file]) => {
+          var data = readFile(pathname, file.data)
+          if (data && data.kind && data.spec) {
+            log?.(`Load resource file: ${pathname}`)
+            files[pathname] = data
+            appendResource(data)
+          }
+        }
+      )
+
+      console.info('Initial configuration downloaded')
+
+      if (onResourceChange) {
+        notifyCreate = function (resource) { onResourceChange(resource, null) }
+        notifyDelete = function (resource) { onResourceChange(null, resource) }
+        notifyUpdate = function (resource, old) { onResourceChange(resource, old) }
+        watch()
+      }
+    })
+  }
+
+  function download() {
+    console.info('GET', url.href)
+    return agent.request('GET', os.path.join(url.path, '/')).then(
+      res => {
+        var status = res?.head?.status
+        if (status < 200 || status >= 300 || !status) {
+          console.error('GET', os.path.join(url.href, '/'), 'response error', status)
+          return null
+        }
+
+        var version = res.head.headers['etag']
+        var files = {}
+        var queue = res.body.toString().split('\n').filter(s=>s).map(
+          path => {
+            var i = path.indexOf('#')
+            return i >= 0 ? path.substring(0,i) : path
+          }
+        )
+
+        function downloadNext() {
+          if (queue.length === 0) {
+            return { version, files }
+          }
+
+          var filePath = queue.shift()
+          var httpPath = os.path.join(url.path, filePath)
+
+          console.info('GET', httpPath)
+
+          return agent.request('GET', httpPath).then(
+            res => {
+              var status = res?.head?.status
+              if (status < 200 || status >= 300 || !status) {
+                console.error('GET', httpPath, 'response error', status)
+                return null
+              }
+              files[filePath] = {
+                etag: res.head.headers['etag'] || '',
+                data: res?.body || new Data
+              }
+              return downloadNext()
+            }
+          ).catch(() => null)
+        }
+
+        return downloadNext()
+      }
+    ).catch(() => null)
+  }
+
+  function watch() {
+    new Timeout(5).wait().then(
+      () => agent.request('HEAD', os.path.join(url.path, '/')).catch(() => null)
+    ).then(
+      res => {
+        var status = res?.head?.status
+        if (status < 200 || status >= 300 || !status) {
+          console.error('HEAD', os.path.join(url.href, '/'), 'response error', status)
+          return watch()
+        }
+
+        var headers = res.head.headers
+        if (headers['etag'] === configVersion) return watch()
+
+        console.info('Found configuration version change', configVersion, '=>', headers['etag'])
+
+        return agent.request('GET', os.path.join(url.path, '/')).then(
+          res => {
+            var status = res?.head?.status
+            if (status < 200 || status >= 300 || !status) return watch()
+
+            var newConfigVersion = headers['etag']
+            var oldSet = new Set(Object.keys(configFiles))
+            var newSet = {}
+
+            res.body.toString().split('\n').forEach(
+              line => {
+                line = line.trim()
+                var i = line.lastIndexOf('#')
+                if (i >= 0) {
+                  var path = line.substring(0,i)
+                  var etag = line.substring(i+1)
+                  var old = configFiles[path]
+                  if (old?.etag !== etag) {
+                    newSet[path] = true
+                  }
+                  oldSet.delete(path)
+                }
+              }
+            )
+
+            oldSet.forEach(path => { newSet[path] = true })
+
+            return Promise.all(Object.keys(newSet).map(
+              path => agent.request('GET', os.path.join(url.path, path)).then(
+                res => {
+                  var status = res?.head?.status
+                  if (200 <= status && status < 300) {
+                    var etag = res.head.headers['etag'] || ''
+                    var data = res.body || new Data
+                    configFiles[path] = { etag, data }
+                    console.info('Downloaded file', path)
+                    changeFile(path, readFile(path, data))
+                  } else if (status === 404) {
+                    delete configFiles[path]
+                    console.info('Erased 404 file', path)
+                    changeFile(path, null)
+                  }
+                }
+              )
+            )).then(() => {
+              configVersion = newConfigVersion
+              watch()
+            })
+          }
+        )
+      }
+    ).catch(err => {
+      console.error(err)
+      watch()
+    })
+  }
+
+  function readFile(pathname, data) {
+    try {
+      if (isJSON(pathname)) {
+        return JSON.decode(data)
+      } else if (isYAML(pathname)) {
+        return YAML.decode(data)
+      } else if (isSecret(pathname)) {
+        var name = os.path.basename(pathname)
+        secrets[name] = data
+      }
+    } catch {
+      console.error(`Cannot parse file: ${pathname}, skpped.`)
+    }
+  }
+}
+
 function initZTM({ mesh, app }, onResourceChange) {
   allExports.ztm = { mesh, app }
   var resourceDir = `/users/${app.username}/resources/`
   return mesh.list(resourceDir).then(
     list => Promise.all(Object.keys(list).map(
-      pathname => readFileZTM(mesh, app, pathname).then(
+      pathname => readFile(mesh, app, pathname).then(
         data => {
           if (data && data.kind && data.spec) {
             app.log(`Load resource file: ${pathname}`)
@@ -214,7 +399,7 @@ function initZTM({ mesh, app }, onResourceChange) {
       function watch() {
         mesh.watch(resourceDir).then(pathnames => {
           Promise.all(pathnames.map(
-            pathname => readFileZTM(mesh, app, pathname).then(
+            pathname => readFile(mesh, app, pathname).then(
               data => {
                 app.log(`Resource file changed: ${pathname}`)
                 changeFile(pathname, data)
@@ -234,29 +419,30 @@ function initZTM({ mesh, app }, onResourceChange) {
       }
     })
   )
-}
 
-function readFileZTM(mesh, app, pathname) {
-  return mesh.read(pathname).then(
-    data => {
-      try {
-        if (isJSON(pathname)) {
-          return JSON.decode(data)
-        } else if (isYAML(pathname)) {
-          return YAML.decode(data)
-        } else if (isSecret(pathname)) {
-          var name = os.path.basename(pathname)
-          secrets[name] = data
+  function readFile(mesh, app, pathname) {
+    return mesh.read(pathname).then(
+      data => {
+        try {
+          if (isJSON(pathname)) {
+            return JSON.decode(data)
+          } else if (isYAML(pathname)) {
+            return YAML.decode(data)
+          } else if (isSecret(pathname)) {
+            var name = os.path.basename(pathname)
+            secrets[name] = data
+          }
+        } catch {
+          app.log(`Cannot load or parse file: ${pathname}, skpped.`)
         }
-      } catch {
-        app.log(`Cannot load or parse file: ${pathname}, skpped.`)
       }
-    }
-  )
+    )
+  }
 }
 
 var allExports = {
   init,
+  initURL,
   initZTM,
   list,
   find,

@@ -31,13 +31,13 @@ if (opts['--help']) {
   println('')
   println('PQC-enabled Gateway')
   println('')
-  println('Usage: gw -c <dirname/filename> [-w|--watch] [-d|--debug]')
+  println('Usage: gw -c <dirname/filename/url> [-w|--watch] [-d|--debug]')
   println('   or: gw -s <dirname[:[ip:]port]>')
   println('   or: gw -v')
   println('   or: gw -h')
   println('')
   println('Options:')
-  println('  -c, --config <dirname/filename>      Point to the configuration file or directory')
+  println('  -c, --config <dirname/filename/url>  Point to the configuration file or directory or URL')
   println('  -s, --serve  <dirname[:[ip:]port]>   Start configuration server with specified directory')
   println('  -w, --watch                          Monitor configuration changes and perform live updates')
   println('  -d, --debug                          Print debugging log for each request')
@@ -75,17 +75,29 @@ if (opts['--help']) {
   }
 
 } else if (opts['--config']) {
+  var configSource = opts['--config']
+  var watcher = opts['--watch'] ? makeResourceWatcher() : null
+
   enableLog(opts['--debug'])
   enableDump(opts['--dump'])
 
-  resources.init(opts['--config'], opts['--watch'] ? makeResourceWatcher() : null)
-  resources.list('Gateway').forEach(gw => {
-    if (gw.metadata?.name) {
-      startGateway(gw)
-    }
-  })
+  function startGateways() {
+    resources.list('Gateway').forEach(gw => {
+      if (gw.metadata?.name) {
+        startGateway(gw)
+      }
+    })
 
-  console.info('FGW started')
+    console.info('PGW started')
+  }
+
+  if (configSource.startsWith('http://') || configSource.startsWith('https://')) {
+    resources.initURL({ url: new URL(configSource) }, watcher).then(() => startGateways())
+
+  } else {
+    resources.init(opts['--config'], watcher)
+    startGateways()
+  }
 
 } else {
   println(`gw: Configuration not specified. Type 'gw -h' for help.`)
