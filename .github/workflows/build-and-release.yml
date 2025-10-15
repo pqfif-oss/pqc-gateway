@@ -20,7 +20,7 @@ jobs:
             target: linux-x64
             artifact_name: gw
             asset_name: pqc-gateway-linux-x64
-          - os: macos-14
+          - os: macos-latest
             target: macos-arm64
             artifact_name: gw
             asset_name: pqc-gateway-macos-arm64
@@ -40,10 +40,10 @@ jobs:
       - name: Install dependencies (macOS)
         if: startsWith(matrix.os, 'macos')
         run: |
-          brew install cmake llvm
-          # Ensure clang is available
-          export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+          brew install cmake
+          # Use Xcode clang instead of brew llvm for better compatibility
+          sudo xcode-select --install || true
+          echo "Using Xcode clang for ARM64 compatibility"
 
       - name: Set up environment variables
         run: |
