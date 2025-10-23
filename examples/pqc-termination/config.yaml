@@ -5,7 +5,7 @@ resources:
   spec:
     listeners:
       - port: 9443
-        protocol: HTTPS
+        protocol: TLS
         tls:
           mode: Terminate
           pqc:
