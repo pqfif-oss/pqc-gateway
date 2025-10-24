@@ -1,0 +1,49 @@
+resources:
+- kind: Gateway
+  metadata:
+    name: test
+  spec:
+    listeners:
+      - port: 8000
+        protocol: HTTP
+
+- kind: HTTPRoute
+  spec:
+    parentRefs:
+      - kind: Gateway
+        name: test
+        port: 8000
+    rules:
+      - matches:
+        - path:
+            type: Exact
+            value: /no-timeout
+        backendRefs:
+          - kind: Backend
+            name: slow-svc
+      - matches:
+        - path:
+            type: Exact
+            value: /timeout
+        backendRefs:
+          - kind: Backend
+            name: slow-svc
+        timeouts:
+          request: 3
+      - matches:
+        - path:
+            type: Exact
+            value: /timeout-backend
+        backendRefs:
+          - kind: Backend
+            name: slow-svc
+        timeouts:
+          backendRequest: 3
+
+- kind: Backend
+  metadata:
+    name: slow-svc
+  spec:
+    targets:
+      - address: localhost
+        port: 8080

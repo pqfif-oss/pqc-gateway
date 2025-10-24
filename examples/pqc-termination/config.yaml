@@ -5,7 +5,7 @@ resources:
   spec:
     listeners:
       - port: 9443
-        protocol: TLS
+        protocol: HTTPS
         tls:
           mode: Terminate
           pqc:
@@ -24,15 +24,23 @@ resources:
     rules:
       - backendRefs:
         - kind: Backend
-          name: test-svc
+          name: test-svc-1        
 
 - kind: Backend
   metadata:
-    name: test-svc
+    name: test-svc-1
   spec:
     targets:
       - address: localhost
-        port: 8080
+        port: 8081
+
+- kind: Backend
+  metadata:
+    name: test-svc-2
+  spec:
+    targets:
+      - address: localhost
+        port: 8082
 
 secrets:
   a.b.example.com.crt: |

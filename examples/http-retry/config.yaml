@@ -1,0 +1,44 @@
+resources:
+- kind: Gateway
+  metadata:
+    name: test
+  spec:
+    listeners:
+      - port: 8000
+        protocol: HTTP
+
+- kind: HTTPRoute
+  spec:
+    parentRefs:
+      - kind: Gateway
+        name: test
+        port: 8000
+    rules:
+      - matches:
+        - path:
+            type: Exact
+            value: /no-retry
+        backendRefs:
+          - kind: Backend
+            name: test-svc
+      - matches:
+        - path:
+            type: Exact
+            value: /retry
+        backendRefs:
+          - kind: Backend
+            name: test-svc
+        retry:
+          codes:
+            - 5xx
+            - 403
+          attempts: 3
+          backoff: 0.1
+
+- kind: Backend
+  metadata:
+    name: test-svc
+  spec:
+    targets:
+      - address: localhost
+        port: 8080
