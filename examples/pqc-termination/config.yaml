@@ -1,48 +1,127 @@
 resources:
-- kind: Gateway
-  metadata:
-    name: test
-  spec:
-    listeners:
-      - port: 9443
-        protocol: HTTPS
-        tls:
-          mode: Terminate
-          pqc:
-            signature: ML-DSA-44
-            keyExchange: ML-KEM-768
-          certificates:
-            - tls.crt: a.b.example.com.crt
-              tls.key: a.b.example.com.key
+  - kind: Gateway
+    metadata:
+      name: plain-http
+    spec:
+      listeners:
+        - name: 301-redirect
+          port: 80
+          protocol: HTTP
+  - kind: HTTPRoute
+    spec:
+      parentRefs:
+        - kind: Gateway
+          name: plain-http
+          sectionName: 301-redirect
+      rules:
+        - filters:
+          - type: RequestTermination
+            requestTermination:
+              response:
+                status: 301
+                headers:
+                  location: https://pqfif-oss.ai/
+                body: Permenent Moved to https://pqfif-oss.ai/
 
-- kind: TCPRoute
-  spec:
-    parentRefs:
-      - kind: Gateway
-        name: test
-        port: 9443
-    rules:
-      - backendRefs:
+  - kind: Gateway
+    metadata:
+      name: https-pqc
+    spec:
+      listeners:
+        - port: 443
+          protocol: HTTPS
+          tls:
+            mode: Terminate
+            pqc:
+              keyExchange: X25519:X25519MLKEM768
+            certificates:
+              - tls.crt: a.b.example.com.crt
+                tls.key: a.b.example.com.key
+  - kind: HTTPRoute
+    spec:
+      parentRefs:
+        - kind: Gateway
+          name: https-pqc
+          port: 443
+      hostnames:
+        - a.b.example.com
+      rules:
+        - filters:
+          - type: RequestHeaderModifier
+            requestHeaderModifier:
+              set:
+                - name: Host
+                  value: pqfif-oss.ai
+          - type: FileLog
+            key: pqc-gateway
+            fileLog:
+              filename: /opt/pqc-gateway/log/accesslog.json
+              maxFileSize: 1024000000
+          - type: RateLimit
+            key: rate-limit
+            rateLimit:
+              burst: 1500
+              requests: 1000
+              interval: 1
+              backlog: 500
+              response:
+                status: 429
+                headers:
+                  rate-limit-by: pqc-gateway 
+                body: Rate Limit Reached, by PQC-Gateway.
+          backendRefs:
+            - kind: Backend
+              name: www     
+
+  - kind: Backend
+    metadata:
+      name: www
+    spec:
+      targets:
+        - address: pqfif-oss.ai
+          port: 443
+  - kind: BackendTLSPolicy
+    spec:
+      targetRefs:
         - kind: Backend
-          name: test-svc-1        
-
-- kind: Backend
-  metadata:
-    name: test-svc-1
-  spec:
-    targets:
-      - address: localhost
-        port: 8081
-
-- kind: Backend
-  metadata:
-    name: test-svc-2
-  spec:
-    targets:
-      - address: localhost
-        port: 8082
+          name: www
+      validation:
+        hostname: pqfif-oss.ai
+        caCertificates:
+          ca.crt: pqfif-oss.crt
 
 secrets:
+  pqfif-oss.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIE9DCCA9ygAwIBAgISBhPxLiifQ/KuBF4SgPhuXZmGMA0GCSqGSIb3DQEBCwUA
+    MDMxCzAJBgNVBAYTAlVTMRYwFAYDVQQKEw1MZXQncyBFbmNyeXB0MQwwCgYDVQQD
+    EwNSMTMwHhcNMjUxMDI5MDEwOTI0WhcNMjYwMTI3MDEwOTIzWjAXMRUwEwYDVQQD
+    EwxwcWZpZi1vc3MuYWkwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCY
+    mFjr7Mu2d4HocA6HIjHv0mNjZwGckE4QFpSc9Rm2BTBWtoJBYtQxC3nA1OHBNhMf
+    XHAWIdAcUxOMPAyMXRVH+MeUKUGPwuOyKbYbd42oc+rYY5E30iZQYaEEvfp2Igal
+    oD3cB0uPtwYktheSLsmu3BYsLMNslCMtn53UQNqYJj1nhze2TKSj7lIx44cs7Tju
+    cKW1mH3Dh5b7LkVsomwk/2NCtuR81F9rlnMkegyliWiG8XEDeVMOiBxuWqXwgAxm
+    DaSiILW5CRwANY88iaeKjE5X/R4oGTpj0FYD6fUyDTdAP5qQcTPX17R+QUi0BaqO
+    92U2h4dmyv9tg0PvSKyNAgMBAAGjggIcMIICGDAOBgNVHQ8BAf8EBAMCBaAwHQYD
+    VR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMAwGA1UdEwEB/wQCMAAwHQYDVR0O
+    BBYEFFjJsqpo5qVIzNgr6EKyv3++RWZoMB8GA1UdIwQYMBaAFOernw8sM6BT015P
+    eMiyhA471pIzMDMGCCsGAQUFBwEBBCcwJTAjBggrBgEFBQcwAoYXaHR0cDovL3Ix
+    My5pLmxlbmNyLm9yZy8wFwYDVR0RBBAwDoIMcHFmaWYtb3NzLmFpMBMGA1UdIAQM
+    MAowCAYGZ4EMAQIBMC0GA1UdHwQmMCQwIqAgoB6GHGh0dHA6Ly9yMTMuYy5sZW5j
+    ci5vcmcvNy5jcmwwggEFBgorBgEEAdZ5AgQCBIH2BIHzAPEAdwBJnJtp3h187Pw2
+    3s2HZKa4W68Kh4AZ0VVS++nrKd34wwAAAZotuMRBAAAEAwBIMEYCIQD4se81h0Wh
+    Y6RNKWwxaOCq/MMLlAvkkPFXRunD2PdEKQIhAMJYvNi4Yx4qx0sRTxY5GkUI1onO
+    VQTfQzmNAfc373o8AHYAlpdkv1VYl633Q4doNwhCd+nwOtX2pPM2bkakPw/KqcYA
+    AAGaLbjEiwAABAMARzBFAiEAkuCLORwxAxuVF2roPkqzZ1Kg75yDffoVGd1ra+29
+    iycCICFDIJyKI1tQNk132LH52gJVyIKoL4eEL52c2eZTkHYFMA0GCSqGSIb3DQEB
+    CwUAA4IBAQCZi/O8CtF/XvN8BRLm49bk6UrxCM9yx96Q0KlNeajta9zuON5Fc6gg
+    odyllhAu40LMniNztJUXuDv3VjQPhnb9PrwL+zWUZTSgAd0elVVzzdkAw+kkE5+9
+    wz0hndpeJE8y6XqevqXsZ74guZmvWz9XnBv5klqPLr/u3Ai2Qyn0SijTrwKVZv8O
+    9zJ+MOHkffqfA1fkiOKn7Ec8i6JjPypiXY+tPtGWkQrulGWG29AuokFMAz5kahRn
+    P7muHOWzl0jwOeYxNeUMmrFCVGy4FHgHsKMfpd4YfdXJHAWIUBmZiw0R1r6lzVeD
+    QPptTUAto+Wfyijh7n3dOkz361NtmA0p
+    -----END CERTIFICATE-----
+
   a.b.example.com.crt: |
     -----BEGIN CERTIFICATE-----
     MIIPYzCCBdmgAwIBAgIUJvbOsJE8NfaS+5/ebRaqk4b9EHAwCwYJYIZIAWUDBAMR
